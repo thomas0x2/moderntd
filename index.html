@@ -54,6 +54,7 @@ body{color:var(--fg);font-family:var(--f-ui);font-size:14px;line-height:1.4;back
 .ro span{font-family:var(--f-data);font-size:9px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase}
 .ro b{font-family:var(--f-data);font-weight:500;font-size:14px;font-variant-numeric:tabular-nums;color:var(--fg);text-shadow:0 0 6px rgba(212,227,231,.25);white-space:nowrap}
 #roCredits{color:var(--amber);text-shadow:0 0 8px rgba(240,181,69,.4)}
+#roCredits.debt{color:var(--hostile);text-shadow:0 0 8px rgba(255,93,80,.5)}
 #roScen{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;line-height:19px}
 #roStatus{letter-spacing:.12em}
 #roStatus.engaged{color:var(--hostile);text-shadow:0 0 8px rgba(255,93,80,.5);animation:pulse 1.2s steps(2) infinite}
@@ -1902,11 +1903,11 @@ function turnTo(tw, t, dt, rate) {
 }
 /* credits per shot; lasers, HPM and jammers fire for free */
 const AMMO = { ciws: 0.15, gun: 0.15, hive: 2, aam: 4, nasams: 6, frigate: 8, patriot: 25 };
+/* munitions are always paid for: weapons never hold fire, and an empty budget simply runs into debt */
 function charge(tw, cr) {
-  if (state.credits < cr) {
-    if (tw) tw.noFunds = 1.5;
-    if (!state.fundsWarned) { state.fundsWarned = true; log('Budget exhausted · weapons that cost credits are holding fire', 'bad'); state.banner = { text: 'BUDGET EXHAUSTED', sub: 'Guns, hunters and missiles hold fire until credits come in · lasers, HPM and jammers keep working', t: 0, col: COL.amber }; }
-    return false;
+  if (state.credits >= 0 && state.credits < cr && !state.fundsWarned) {
+    state.fundsWarned = true; log('Budget exhausted · weapons keep firing on credit, the treasury is going into debt', 'bad');
+    state.banner = { text: 'IN DEBT', sub: 'Weapons keep firing on credit · no new systems, upgrades or repairs until income clears the debt', t: 0, col: COL.amber };
   }
   state.credits -= cr; state.wstats.mun += cr; if (tw) { tw.mun = (tw.mun || 0) + cr; tw.wmun = (tw.wmun || 0) + cr; }
   return true;
@@ -2444,7 +2445,6 @@ function drawTowers() {
       ctx.textAlign = 'center'; ctx.textBaseline = 'top'; label('OFFLINE', tw.x, tw.y + 16, COL.hostile, `600 8.5px ${MONO}`);
       continue;
     }
-    if (tw.noFunds > 0) { ctx.textAlign = 'center'; ctx.textBaseline = 'top'; label('NO FUNDS', tw.x, tw.y + 24, COL.amber, `600 8.5px ${MONO}`); }
     ctx.strokeStyle = COL.friend; ctx.lineWidth = 1.3; ctx.beginPath();
     for (let i = 0; i <= tw.level; i++) { const x = tw.x - 16 + i * 5, y = tw.y - 19; ctx.moveTo(x, y + 2.5); ctx.lineTo(x + 2, y); ctx.lineTo(x + 4, y + 2.5); }
     if (hasSpecial(tw.type)) { ctx.stroke(); ctx.fillStyle = COL.amber; ctx.beginPath(); const x = tw.x - 16 + (tw.level + 1) * 5 + 2, y = tw.y - 18; ctx.moveTo(x, y - 2.5); ctx.lineTo(x + 2.5, y); ctx.lineTo(x, y + 2.5); ctx.lineTo(x - 2.5, y); ctx.closePath(); ctx.fill(); ctx.beginPath(); }
@@ -3042,6 +3042,7 @@ function renderIntel() {
   if (def.g.some(g => g[2] === 'supply' || g[5] === 'supply')) adv.push('Some raids are aimed at supply lines. Cover the bridges and stations.');
   if (wx === 'RAIN') adv.push('Rain: laser range −35%.'); if (wx === 'HAZE') adv.push('Haze: laser range −15%.'); if (wx === 'SNOW') adv.push('Snow: laser range −28%, slow drones fly 8% slower.');
   if (gridFactor() < 1) adv.push(`Power grid at ${Math.round(gridFactor() * 100)}%: lasers and HPM degraded.`);
+  if (state.credits < 0) adv.push(`In debt by ${Math.ceil(-state.credits)} CR: no new systems, upgrades or repairs until income clears it. Weapons keep firing.`);
   const cutN = lines.filter(lineCut).length; if (cutN) adv.push(`${cutN} supply line${cutN > 1 ? 's' : ''} cut. Repair them between waves to restore income.`);
   $('#intelAdv').innerHTML = adv.map(a => `<li>${a}</li>`).join('');
   renderAdvToggle(adv.length);
@@ -3061,7 +3062,7 @@ function buildSites() {
 }
 function tickUI() {
   $('#roWave').textContent = String(state.wave).padStart(2, '0') + (state.endless || state.wave > WAVE_COUNT ? ' / ∞' : ' / ' + WAVE_COUNT);
-  $('#roCredits').textContent = Math.floor(state.credits).toLocaleString('en-US');
+  { const c = Math.floor(state.credits), el = $('#roCredits'); el.textContent = (c < 0 ? '−' : '') + Math.abs(c).toLocaleString('en-US'); el.classList.toggle('debt', c < 0); }
   const wx = $('#roWx'); wx.textContent = state.wx; wx.className = state.wx.toLowerCase();
   $('#roClock').textContent = clockStr(state.clock);
   $('#roZulu').textContent = new Date().toISOString().slice(11, 19) + 'Z';
@@ -3104,7 +3105,7 @@ function showOverlay(kind) {
     const supLegend = Object.keys(LINE_KIND).map(k => `<div><i class="swatch" style="background:${LINE_COL[k]}"></i>${LINE_KIND[k]}</div>`).join('');
     overlay.innerHTML = `<div class="brief wide"><span class="eyebrow">Flash · air defense tasking</span><h1>Choose a theater</h1>
       <p>Hostile forces are launching drones, cruise missiles and ballistic missiles at your sites and at the supply lines that feed them. Every site pays income after each wave. A cut railway, road, pipeline or power line lowers the income of the site it feeds until you repair it. Lose the capital and the mission ends.</p>
-      <p class="muted">Your score is the cost exchange when you clear wave ${WAVE_COUNT}: interceptor spend divided by the value of the threats you destroyed. Lower is better. Cheap kills from guns, lasers, jammers and hunter drones score better than firing Patriots at drones. Munitions also cost credits: a Patriot shot is 25 CR, a hunter drone 2 CR, and lasers, HPM and jammers fire for free.</p>
+      <p class="muted">Your score is the cost exchange when you clear wave ${WAVE_COUNT}: interceptor spend divided by the value of the threats you destroyed. Lower is better. Cheap kills from guns, lasers, jammers and hunter drones score better than firing Patriots at drones. Munitions also cost credits: a Patriot shot is 25 CR, a hunter drone 2 CR, and lasers, HPM and jammers fire for free. Weapons never hold fire: if the budget runs dry, you go into debt and can't build until income clears it.</p>
       <div class="scen" id="scenList">${SCENARIOS.map(sc => { const b = bestFor(sc.id), hs = bestCx(sc.id); return `<button type="button" class="scard${sc.id === pickId ? ' on' : ''}" data-id="${sc.id}" aria-pressed="${sc.id === pickId}">
         <img src="${thumb(sc)}" alt="">${diffPips(sc.diff)}<h3>${sc.name}</h3><p>${sc.blurb}</p>
         <span class="facts">${sc.sites.length} sites · ${sc.supply.length} supply lines · ${sc.credits} CR</span><span class="facts hs">${hs !== null ? `High score: ${hs.toFixed(2)} cost exchange` : b ? `Best: wave ${b} · not yet completed` : 'Not yet played'}</span>${(sv => sv ? `<span class="facts sv">Saved · wave ${sv.wave}${sv.endless ? ' (endless)' : ''} · ${savedAgo(sv.savedAt)}</span>` : '')(readSave(sc.id))}</button>`; }).join('')}</div>
