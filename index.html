@@ -718,7 +718,7 @@ const TOWERS = {
             role: 'Radar-directed 20 mm gun. Shreds drones, struggles to track fast cruise missiles.', engages: 'Drones, cruise missiles',
             levels: [{ range: 120, rate: 12, dmg: 3.4 }, { range: 135, rate: 16, dmg: 4.2, up: 140 }, { range: 150, rate: 20, dmg: 5.4, up: 260 }] },
   hive:   { name: 'Hunter drones', full: 'Interceptor drone hangar', key: '2', cost: 200, hp: 45, shot: 0.02, pri: 'first',
-            role: 'Launches kinetic hunter drones that ram slow targets. Very cheap kills.', engages: 'Drones only',
+            role: 'Launches kinetic hunter drones that ram slow targets. Every hit kills a Shahed outright. Very cheap kills.', engages: 'Drones only',
             levels: [{ range: 250, cap: 3, build: 2.8, dmg: 48, spd: 170 }, { range: 280, cap: 4, build: 2.2, dmg: 60, spd: 195, up: 180 }, { range: 310, cap: 6, build: 1.6, dmg: 80, spd: 220, up: 320 }] },
   ew:     { name: 'EW jammer', full: 'Electronic warfare jammer', key: '3', cost: 175, hp: 35, shot: 0,
             role: 'Jams GPS and datalinks. Slows drones, drops FPV links, spoofs guided munitions off target.', engages: 'GPS / datalink guided',
@@ -2053,7 +2053,8 @@ function updMissile(m, dt) {
   if (dist(m.x, m.y, t.x, t.y) < m.v * dt + 8 + t.d.size * 0.4) {
     m.dead = true; t.pending = Math.max(0, t.pending - m.pend);
     const pk = t.d.alt === 'hyper' ? (m.hpk || 0.3) : m.pk;
-    if (Math.random() < pk) { if (m.kind === 'pat' || m.kind === 'sam') boom(m.x, m.y, 12, '#ffffff'); damage(t, m.dmg, m.owner); }
+    // a hunter that connects always kills a Shahed-type drone outright, however tough the wave has made it
+    if (Math.random() < pk) { if (m.kind === 'pat' || m.kind === 'sam') boom(m.x, m.y, 12, '#ffffff'); damage(t, m.kind === 'hunter' && t.type === 'shahed' ? Math.max(m.dmg, t.hp) : m.dmg, m.owner); }
     else { fxText('MISS', t.x + 10, t.y - 10, COL.dim, 0.9, 9); if (t.d.missile) log(`Interceptor missed ${t.d.code} TN ${t.tn}`, 'warn'); }
   }
   if (m.life <= 0 && !m.dead) { m.dead = true; if (m.target) m.target.pending = Math.max(0, m.target.pending - m.pend); boom(m.x, m.y, 6, COL.dim); }
