@@ -1,5 +1,5 @@
 /* ModernTD offline cache. The app shell is cached on install; fonts are cached the first time they load. */
-const CACHE = 'moderntd-5e1beac275';
+const CACHE = 'moderntd-ff3c0af2dd';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'fonts/fonts.css', 'fonts/IBMPlexMono-400.woff2', 'fonts/IBMPlexMono-500.woff2', 'fonts/IBMPlexMono-600.woff2', 'fonts/SairaSemiCondensed-400.woff2', 'fonts/SairaSemiCondensed-500.woff2', 'fonts/SairaSemiCondensed-600.woff2', 'fonts/SairaSemiCondensed-700.woff2', 'fonts/SairaStencilOne-400.woff2', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
