@@ -1547,6 +1547,8 @@ for (const k of Object.keys(TOWERS)) {
   TECH.push({ id: k + '3', col: k, name: 'Mk III', cost: 6, req: [k + '2'], tier: 2 });
   TECH.push({ id: k + 's', col: k, name: SPECIAL[k].name, cost: 5, req: [k + '3'], desc: SPECIAL[k].desc });
 }
+/* jet interceptors: an extra hunter program, deliberately limited so jet drones stay a threat */
+TECH.push({ id: 'hivej', col: 'hive', name: 'Jet interceptors', cost: 6, req: ['hive3'], desc: 'Mk III hangars launch faster interceptor drones at jet drones too. Each launch at a jet costs 8 CR, hits about 60% of the time, and only works head-on: a jet that has already passed cannot be chased down.' });
 for (const b of DOCTRINE) for (const n of b.nodes) TECH.push({ ...n, col: b.key });
 const TECH_BY = Object.fromEntries(TECH.map(t => [t.id, t]));
 const has = id => !!state && state.tech.has(id);
@@ -1572,6 +1574,7 @@ function effStats(k, lvl, sp) {
     case 'radar': L.range *= 1.2; L.boost += 0.1; break;
     case 'frigate': L.range *= 1.1; L.bmTerm = 0.7; break;
   }
+  if (k === 'hive' && lvl >= 2 && has('hivej')) L.jet = 1;
   if (k === 'nasams' || k === 'patriot' || k === 'frigate') { if (has('net4')) L.int *= 0.85; if (has('net5')) { L.reload *= 0.7; L.mag += 2; } }
   if (k === 'patriot' && has('net3')) { L.term -= 0.08; L.hpk += 0.1; }
   if (L.term) L.term = Math.max(0.3, L.term);
@@ -1869,12 +1872,15 @@ function canEngage(kind, t, L) {
   const a = t.d.alt;
   switch (kind) {
     case 'ciws': case 'laser': case 'nasams': case 'aam': return a === 'low';
-    case 'hive': return !!t.d.slow;
+    case 'hive': return !!t.d.slow || (t.type === 'jet' && !!L && !!L.jet);
     case 'patriot': return a === 'ballistic' ? t.t >= L.term : true;
     case 'frigate': return a === 'low' || (a === 'ballistic' && !!L && !!L.bmTerm && t.t >= L.bmTerm);
   }
   return false;
 }
+/* a jet can only be met head-on: true while it is still flying toward the point (x, y) */
+const headOn = (x, y, t) => t.vx * (x - t.x) + t.vy * (y - t.y) > 0;
+const JET_HUNT = { cost: 8, shot: 0.08, pk: 0.6 };
 function perceivedDmg(t) { return t.d.decoy && !t.identified ? THREATS.shahed.dmg : t.d.dmg + (t.d.mirv ? 60 : 0); }
 function score(pri, t, dd) {
   switch (pri) {
@@ -1891,6 +1897,7 @@ function pick(tw, range, avoidOverkill) {
     if (!canEngage(tw.type, t, L)) continue;
     const dd = dist(tw.x, tw.y, t.x, t.y); if (dd > range) continue;
     if (priSkip(tw, t)) continue;
+    if (tw.type === 'hive' && t.type === 'jet' && !headOn(tw.x, tw.y, t)) continue;
     if (avoidOverkill && t.pending >= t.hp) continue;
     const s = score(tw.priority, t, dd); if (s > bs) { bs = s; best = t; }
   }
@@ -1917,7 +1924,7 @@ function launchMissile(src, t, o) {
   const pend = o.dmg * o.pk * (t.d.alt === 'low' ? 1 : 0.7);
   t.pending += pend;
   missiles.push({ kind: o.kind, x: src.x, y: src.y, a: o.a, v: o.v0, vmax: o.vmax, acc: o.acc, turn: o.turn, target: t, dmg: o.dmg, pk: o.pk, hpk: o.hpk, pend,
-    owner: o.owner || null, life: o.life, trail: [], tt: 0, dead: false, home: false, armT: o.armT || 0 });
+    owner: o.owner || null, life: o.life, trail: [], tt: 0, dead: false, home: false, armT: o.armT || 0, jetPaid: !!o.jetPaid });
 }
 function updTower(tw, dt) {
   tw.hitF = Math.max(0, tw.hitF - dt * 1.5);
@@ -1971,9 +1978,10 @@ function updTower(tw, dt) {
       tw.cool -= dt;
       if (tw.ready > 0 && tw.cool <= 0) {
         const t = pick(tw, range, true);
-        if (t && charge(tw, AMMO.hive)) {
-          tw.ready--; tw.cool = 0.3; tw.fired++; spend(tw, T.shot); sfx('hunter');
-          launchMissile(tw, t, { kind: 'hunter', a: Math.atan2(t.y - tw.y, t.x - tw.x) + rand(-0.8, 0.8), v0: L.spd * 0.5, vmax: L.spd, acc: 300, turn: 4.5, dmg: L.dmg, pk: L.pk || 0.92, owner: tw, life: 16 });
+        const jet = t && t.type === 'jet';
+        if (t && charge(tw, jet ? JET_HUNT.cost : AMMO.hive)) {
+          tw.ready--; tw.cool = 0.3; tw.fired++; spend(tw, jet ? JET_HUNT.shot : T.shot); sfx('hunter');
+          launchMissile(tw, t, { kind: 'hunter', a: Math.atan2(t.y - tw.y, t.x - tw.x) + rand(-0.8, 0.8), v0: L.spd * 0.5, vmax: L.spd, acc: 300, turn: 4.5, dmg: L.dmg, pk: L.pk || 0.92, owner: tw, life: 16, jetPaid: jet });
         }
       }
       break;
@@ -2028,6 +2036,7 @@ function retarget(m) {
   const L = m.owner ? levelOf(m.owner) : null; let best = null, bd = m.kind === 'hunter' ? 240 : 220;
   for (const t of threats) {
     if (!canEngage(kind, t, L)) continue; if (t.pending >= t.hp) continue;
+    if (m.kind === 'hunter' && t.type === 'jet' && (!m.jetPaid || !headOn(m.x, m.y, t))) continue;
     const d = dist(m.x, m.y, t.x, t.y); if (d < bd) { bd = d; best = t; }
   }
   return best;
@@ -2048,11 +2057,13 @@ function updMissile(m, dt) {
     else if (m.kind === 'hunter') { m.home = true; m.target = null; return; }
     else { m.dead = true; boom(m.x, m.y, 6, COL.dim); return; }
   }
+  // a hunter that ends up behind a jet cannot catch it: break off and look for something else
+  if (m.kind === 'hunter' && t.type === 'jet' && !headOn(m.x, m.y, t)) { t.pending = Math.max(0, t.pending - m.pend); m.target = null; const nt = retarget(m); if (nt) { m.target = nt; nt.pending += m.pend; } else m.home = true; return; }
   if (m.armT > 0) { m.v = Math.min(m.vmax, m.v + m.acc * dt); m.x += Math.cos(m.a) * m.v * dt; m.y += Math.sin(m.a) * m.v * dt; return; }
   steer(m, t.x, t.y, dt);
   if (dist(m.x, m.y, t.x, t.y) < m.v * dt + 8 + t.d.size * 0.4) {
     m.dead = true; t.pending = Math.max(0, t.pending - m.pend);
-    const pk = t.d.alt === 'hyper' ? (m.hpk || 0.3) : m.pk;
+    const pk = t.d.alt === 'hyper' ? (m.hpk || 0.3) : m.kind === 'hunter' && t.type === 'jet' ? JET_HUNT.pk : m.pk;
     if (Math.random() < pk) { if (m.kind === 'pat' || m.kind === 'sam') boom(m.x, m.y, 12, '#ffffff'); damage(t, m.dmg, m.owner); }
     else { fxText('MISS', t.x + 10, t.y - 10, COL.dim, 0.9, 9); if (t.d.missile) log(`Interceptor missed ${t.d.code} TN ${t.tn}`, 'warn'); }
   }
@@ -2931,7 +2942,7 @@ function renderArmory() {
 
 const SPECS = {
   ciws: [['Range', L => L.range], ['Damage / round', L => L.dmg], ['Rate (rds/s)', L => L.rate], ['Cost / round', () => AMMO.ciws + ' CR']],
-  hive: [['Range', L => L.range], ['Drones', L => L.cap], ['Rebuild', L => L.build + 's'], ['Ram damage', L => L.dmg], ['Cost / drone', () => AMMO.hive + ' CR']],
+  hive: [['Range', L => L.range], ['Drones', L => L.cap], ['Rebuild', L => L.build + 's'], ['Ram damage', L => L.dmg], ['Cost / drone', () => AMMO.hive + ' CR'], ['Jet intercept', L => L.jet ? `${JET_HUNT.cost} CR · ${Math.round(JET_HUNT.pk * 100)}%` : 'No']],
   ew: [['Radius', L => L.range], ['Drone slow', L => Math.round(L.slow * 100) + '%'], ['FPV link loss', L => Math.round(L.crash * 100) + '%/s'], ['Spoof chance', L => Math.round(L.spoof * 100) + '%']],
   laser: [['Range (clear)', L => L.range], ['Beam DPS', L => L.dps]],
   hpm: [['Radius', L => L.range], ['Pulse damage', L => L.dmg], ['Recharge', L => L.cd + 's']],
@@ -3032,7 +3043,7 @@ function renderIntel() {
   if (types.has('ballistic') || types.has('mirv')) adv.push('Ballistic missiles: only Patriot (and frigates with Sea-based terminal defense) can engage, and only in the terminal phase.');
   if (types.has('mirv')) adv.push('MIRV splits into 3 warheads at apogee. Patriot Mk III or better can kill it before the split.');
   if (types.has('nuke')) adv.push('NUCLEAR MISSILE inbound to the capital. If it lands, the mission ends instantly. Only Patriot, or frigates with Sea-based terminal defense, can stop it: stack batteries around the capital and field Mk II or better.');
-  if (types.has('jet')) adv.push('Jet drones fly 2.5× faster than Shaheds: hunter drones cannot catch them. Use guns, lasers, NASAMS or frigates.');
+  if (types.has('jet')) adv.push(`Jet drones fly 2.5× faster than Shaheds. Use guns, lasers, NASAMS or frigates${has('hivej') ? ', or Mk III hunter hangars head-on' : '; the Jet interceptors research lets Mk III hunter hangars meet them head-on'}.`);
   if (def.g.some(g => THREATS[g[0]].swarm)) adv.push('Drones attack in salvos of several at once and spread wide of the corridors.');
   if (types.has('hgv')) adv.push('Hypersonic glide vehicle: Patriot only, at reduced kill probability.');
   if (types.has('stealth')) adv.push('Stealth missiles are invisible outside AESA radar coverage.');
