@@ -1947,7 +1947,7 @@ function updTower(tw, dt) {
       break;
     }
     case 'laser': {
-      if (!valid(tw, tw.target, range)) { const nt = pick(tw, range, false); if (nt !== tw.target) { tw.target = nt; tw.slew = 0.35; } }
+      if (!valid(tw, tw.target, range)) { const nt = pick(tw, range, false); if (nt !== tw.target) { tw.target = nt; tw.slew = 0.2; } }
       const t = tw.target; if (!t) break;
       turnTo(tw, t, dt, 12);
       if (tw.slew > 0) { tw.slew -= dt; break; }
